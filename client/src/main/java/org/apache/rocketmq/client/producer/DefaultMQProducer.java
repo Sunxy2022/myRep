@@ -980,6 +980,12 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
         this.retryResponseCodes.add(responseCode);
     }
 
+    /**
+     * 批量消息发送时，对批量消息的处理
+     * @param msgs 批量消息
+     * @return MessageBatch
+     * @throws MQClientException MQClientException
+     */
     private MessageBatch batch(Collection<Message> msgs) throws MQClientException {
         MessageBatch msgBatch;
         try {

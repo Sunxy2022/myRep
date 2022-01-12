@@ -97,8 +97,11 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
     }
 
     class FaultItem implements Comparable<FaultItem> {
+        // 条目唯一key，这里为Broker名称
         private final String name;
+        // 本次消息发送延迟的时间
         private volatile long currentLatency;
+        // 故障规避开始的时间--是判读当前Broker是否可用的直接依据
         private volatile long startTimestamp;
 
         public FaultItem(final String name) {

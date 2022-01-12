@@ -471,6 +471,12 @@ public class MessageDecoder {
         return map;
     }
 
+    /**
+     * 将单条消息内容编码成字节数组
+     * 利用ByteBuffer缓冲区，将单条消息的内容使用固定格式进行存储
+     * @param message 单条消息Message
+     * @return byte[]
+     */
     public static byte[] encodeMessage(Message message) {
         //only need flag, body, properties
         byte[] body = message.getBody();
@@ -488,24 +494,32 @@ public class MessageDecoder {
             + 2 + propertiesLength;
         ByteBuffer byteBuffer = ByteBuffer.allocate(storeSize);
         // 1 TOTALSIZE
+        // 前四个字节用于存放单条消息总长度
         byteBuffer.putInt(storeSize);
 
         // 2 MAGICCODE
+        // 4-7字节代表魔数
         byteBuffer.putInt(0);
 
         // 3 BODYCRC
+        // 8-11字节代表BODYCRC
         byteBuffer.putInt(0);
 
         // 4 FLAG
+        // 12-15字节存放系统标识
         int flag = message.getFlag();
         byteBuffer.putInt(flag);
 
         // 5 BODY
+        // 16-19字节 存放消息体的总长度
         byteBuffer.putInt(bodyLen);
+        // 紧接着存放消息体，根绝消息体的长度占用实际的空间大小
         byteBuffer.put(body);
 
         // 6 properties
+        // 跟着消息体后面2个字节存储消息扩展属性长度
         byteBuffer.putShort(propertiesLength);
+        // 最后存放扩展熟悉值
         byteBuffer.put(propertiesBytes);
 
         return byteBuffer.array();
@@ -553,6 +567,7 @@ public class MessageDecoder {
         }
         byte[] allBytes = new byte[allSize];
         int pos = 0;
+        // 合并encodedMessages的数据到allBytes
         for (byte[] bytes : encodedMessages) {
             System.arraycopy(bytes, 0, allBytes, pos, bytes.length);
             pos += bytes.length;
