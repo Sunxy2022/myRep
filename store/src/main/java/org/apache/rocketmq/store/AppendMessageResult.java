@@ -57,12 +57,12 @@ public class AppendMessageResult {
     public AppendMessageResult(AppendMessageStatus status, long wroteOffset, int wroteBytes, Supplier<String> msgIdSupplier,
             long storeTimestamp, long logicsOffset, long pagecacheRT) {
         this.status = status;
-        this.wroteOffset = wroteOffset;
-        this.wroteBytes = wroteBytes;
-        this.msgIdSupplier = msgIdSupplier;
-        this.storeTimestamp = storeTimestamp;
-        this.logicsOffset = logicsOffset;
-        this.pagecacheRT = pagecacheRT;
+        this.wroteOffset = wroteOffset;// 消息的物理偏移量
+        this.wroteBytes = wroteBytes;//
+        this.msgIdSupplier = msgIdSupplier;// 创建消息ID的lambda表达式
+        this.storeTimestamp = storeTimestamp;// 消息存储时间戳
+        this.logicsOffset = logicsOffset;// 消息消费队列逻辑偏移量，类似数组下标
+        this.pagecacheRT = pagecacheRT;// 暂未使用
     }
 
     public long getPagecacheRT() {

@@ -67,31 +67,31 @@ import org.apache.rocketmq.store.stats.BrokerStatsManager;
 
 public class DefaultMessageStore implements MessageStore {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
-
+    // 消息存储配置属性
     private final MessageStoreConfig messageStoreConfig;
-    // CommitLog
+    // CommitLog 文件的存储实现类
     private final CommitLog commitLog;
-
+    // 消息队列存储缓存表，按照消息主题分组
     private final ConcurrentMap<String/* topic */, ConcurrentMap<Integer/* queueId */, ConsumeQueue>> consumeQueueTable;
-
+    // 消息队列文件ConsumeQueue刷盘线程
     private final FlushConsumeQueueService flushConsumeQueueService;
-
+    // 清除CommitLog文件的服务
     private final CleanCommitLogService cleanCommitLogService;
-
+    // 清除ConsumeQueue文件的服务
     private final CleanConsumeQueueService cleanConsumeQueueService;
-
+    // 索引文件实现类
     private final IndexService indexService;
-
+    // MappedFile 分配服务
     private final AllocateMappedFileService allocateMappedFileService;
-
+    // commitLog消息分发，根据commitLog文件构建ConsumeQueue和indexFile
     private final ReputMessageService reputMessageService;
-
+    // 存储HA机制
     private final HAService haService;
 
     private final ScheduleMessageService scheduleMessageService;
 
     private final StoreStatsService storeStatsService;
-
+    // 消息堆内存缓存
     private final TransientStorePool transientStorePool;
 
     private final RunningFlags runningFlags = new RunningFlags();
@@ -100,15 +100,17 @@ public class DefaultMessageStore implements MessageStore {
     private final ScheduledExecutorService scheduledExecutorService =
         Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("StoreScheduledThread"));
     private final BrokerStatsManager brokerStatsManager;
+    // 消息拉取长轮询模式消息到达监听器
     private final MessageArrivingListener messageArrivingListener;
+    // broker配置属性
     private final BrokerConfig brokerConfig;
 
     private volatile boolean shutdown = true;
-
+    // 文件刷盘检测点
     private StoreCheckpoint storeCheckpoint;
 
     private AtomicLong printTimes = new AtomicLong(0);
-
+    // CommitLog文件转发请求
     private final LinkedList<CommitLogDispatcher> dispatcherList;
 
     private RandomAccessFile lockFile;
@@ -405,6 +407,7 @@ public class DefaultMessageStore implements MessageStore {
         if (!this.runningFlags.isWriteable()) {
             long value = this.printTimes.getAndIncrement();
             if ((value % 50000) == 0) {
+                // broker磁盘空间不足
                 log.warn("the message store is not writable. It may be caused by one of the following reasons: " +
                     "the broker's disk is full, write to logic queue error, write to index file error, etc");
             }
@@ -421,11 +424,12 @@ public class DefaultMessageStore implements MessageStore {
 
     @Override
     public CompletableFuture<PutMessageResult> asyncPutMessage(MessageExtBrokerInner msg) {
+        // 当前Broker已停止工作，或当前Broker角色为SLAVE则拒绝消息写入
         PutMessageStatus checkStoreStatus = this.checkStoreStatus();
         if (checkStoreStatus != PutMessageStatus.PUT_OK) {
             return CompletableFuture.completedFuture(new PutMessageResult(checkStoreStatus, null));
         }
-
+        // 校验消息主题和消息属性
         PutMessageStatus msgCheckStatus = this.checkMessage(msg);
         if (msgCheckStatus == PutMessageStatus.MESSAGE_ILLEGAL) {
             return CompletableFuture.completedFuture(new PutMessageResult(msgCheckStatus, null));
@@ -479,6 +483,11 @@ public class DefaultMessageStore implements MessageStore {
         return resultFuture;
     }
 
+    /**
+     * 消息存储核心入口
+     * @param msg Message instance to store
+     * @return PutMessageResult
+     */
     @Override
     public PutMessageResult putMessage(MessageExtBrokerInner msg) {
         try {

@@ -42,28 +42,45 @@ import org.apache.rocketmq.store.config.FlushDiskType;
 import org.apache.rocketmq.store.util.LibC;
 import sun.nio.ch.DirectBuffer;
 
+/**
+ * 内存映射文件 一个MappedFile代表一个存储文件
+ */
 public class MappedFile extends ReferenceResource {
+    // 操作系统的每页大小 默认4K
     public static final int OS_PAGE_SIZE = 1024 * 4;
     protected static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
-
+    // 当前JVM实例中，MappedFile虚拟内存
     private static final AtomicLong TOTAL_MAPPED_VIRTUAL_MEMORY = new AtomicLong(0);
-
+    // 当前JVM实例中，MappedFile对象的个数
     private static final AtomicInteger TOTAL_MAPPED_FILES = new AtomicInteger(0);
+    // 当前该文件的写指针，从0开始
     protected final AtomicInteger wrotePosition = new AtomicInteger(0);
+    // 当前文件的提交指针，如果开启transientStorePoolEnable，则数据会存储在transientStorePool中，然后提交到内存映射byteBuffer，再刷写到磁盘
     protected final AtomicInteger committedPosition = new AtomicInteger(0);
+    // 刷写到磁盘指针，该指针之前的数据已刷写到磁盘中
     private final AtomicInteger flushedPosition = new AtomicInteger(0);
+    // 文件大小
     protected int fileSize;
+    // 文件通道
     protected FileChannel fileChannel;
     /**
      * Message will put to here first, and then reput to FileChannel if writeBuffer is not null.
      */
+    // 堆内存byteBuffer，如果不为空，数据首先将存储在改buffer中，然后提交到MappedFile对应的内存映射文件buffer。transientStorePoolEnable=true是不为空
     protected ByteBuffer writeBuffer = null;
+    // 堆内存池，transientStorePoolEnable=true时启用
     protected TransientStorePool transientStorePool = null;
+    // 文件名称
     private String fileName;
+    // 该文件的起始偏移量
     private long fileFromOffset;
+    // 物理文件
     private File file;
+    // 物理文件对应的内存映射buffer
     private MappedByteBuffer mappedByteBuffer;
+    // 文件最后一次写入时间
     private volatile long storeTimestamp = 0;
+    // 是否是MappedFileQueue队列中的第一个文件
     private boolean firstCreateInQueue = false;
 
     public MappedFile() {
@@ -160,8 +177,12 @@ public class MappedFile extends ReferenceResource {
 
         try {
             this.fileChannel = new RandomAccessFile(this.file, "rw").getChannel();
+            // ileChannel.map() 把文件映射为内存影像文件。对得到的缓冲区的更改最终将传播到文件
+            // mappedByteBuffer可实现内存共享，可以在两个Java进程中各使用一次map将文件映射到内存，这样两个进程就可以直接通过这个共享内存来实现进程间的数据通信了
+            // https://zhuanlan.zhihu.com/p/27698585
             this.mappedByteBuffer = this.fileChannel.map(MapMode.READ_WRITE, 0, fileSize);
             TOTAL_MAPPED_VIRTUAL_MEMORY.addAndGet(fileSize);
+            // 当前JVM实例中，MappedFile对象的个数+1
             TOTAL_MAPPED_FILES.incrementAndGet();
             ok = true;
         } catch (FileNotFoundException e) {
@@ -203,7 +224,7 @@ public class MappedFile extends ReferenceResource {
             PutMessageContext putMessageContext) {
         assert messageExt != null;
         assert cb != null;
-
+        // 当前写指针
         int currentPos = this.wrotePosition.get();
 
         if (currentPos < this.fileSize) {
@@ -223,6 +244,7 @@ public class MappedFile extends ReferenceResource {
             this.storeTimestamp = result.getStoreTimestamp();
             return result;
         }
+        // 如果currentPos >= fileSize则表明该文件已满，抛出异常
         log.error("MappedFile.appendMessage return null, wrotePosition: {} fileSize: {}", currentPos, this.fileSize);
         return new AppendMessageResult(AppendMessageStatus.UNKNOWN_ERROR);
     }
@@ -356,18 +378,30 @@ public class MappedFile extends ReferenceResource {
         return write > flush;
     }
 
+    /**
+     * 判断是否需要提交
+     *
+     * @param commitLeastPages 本次提交的最小页数
+     * @return true-需要提交
+     */
     protected boolean isAbleToCommit(final int commitLeastPages) {
+        // 上一次提交的指针
         int flush = this.committedPosition.get();
+        // 当前写指针
         int write = this.wrotePosition.get();
-
+        // 文件已满，返回true，代表需要提交。即写满一页数据再提交
         if (this.isFull()) {
             return true;
         }
-
+        /*
+        判断当前写指针和上次提交指针的差值再除以每页的大小，得到本次待提交数据的总页数
+        如果总页数大于等于本次提交的最小页数，则进行数据的提交
+        若小于本次提交的最小页数，则不提交，等到待提交的数据的累积量超过本次提交的最小页数时再进行提交
+         */
         if (commitLeastPages > 0) {
             return ((write / OS_PAGE_SIZE) - (flush / OS_PAGE_SIZE)) >= commitLeastPages;
         }
-
+        // 如果本次提交的最小页数小于等于0，则表明只要有未提交的数据就进行提交，无需累积到commitLeastPages时才提交
         return write > flush;
     }
 

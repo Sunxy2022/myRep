@@ -30,23 +30,27 @@ import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 
+/**
+ * 用来封装存储文件，是MappedFile映射文件管理容器，并对存储目录进行封装
+ */
 public class MappedFileQueue {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
     private static final InternalLogger LOG_ERROR = InternalLoggerFactory.getLogger(LoggerName.STORE_ERROR_LOGGER_NAME);
 
     private static final int DELETE_FILES_BATCH_MAX = 10;
-
+    // 存储目录
     private final String storePath;
-
+    // 单个文件存储大小
     protected final int mappedFileSize;
-
+    // MappedFile 映射文件集合
     protected final CopyOnWriteArrayList<MappedFile> mappedFiles = new CopyOnWriteArrayList<MappedFile>();
-
+    // 创建MappedFile的服务类
     private final AllocateMappedFileService allocateMappedFileService;
-
+    // 当前刷盘指针。表示该指针之前的所有数据已全部持久化到磁盘
     protected long flushedWhere = 0;
+    // 当前数据提交指针。内存中byteBuffer当前的写指针，该值大于等于flushedWhere
     private long committedWhere = 0;
-
+    // 存储时间戳
     private volatile long storeTimestamp = 0;
 
     public MappedFileQueue(final String storePath, int mappedFileSize,
@@ -75,6 +79,13 @@ public class MappedFileQueue {
         }
     }
 
+    /**
+     * 根据时间戳来查找MappedFile
+     * 从mappedFiles中第一个文件开始查找，找到第一个最后一次更新时间大于timestamp的文件，如果不存在，则返回最后一个MappedFile
+     *
+     * @param timestamp 时间戳
+     * @return MappedFile
+     */
     public MappedFile getMappedFileByTime(final long timestamp) {
         Object[] mfs = this.copyMappedFiles(0);
 
@@ -299,6 +310,11 @@ public class MappedFileQueue {
         return true;
     }
 
+    /**
+     * 获取存储文件的最小偏移量
+     *
+     * @return 最小偏移量
+     */
     public long getMinOffset() {
 
         if (!this.mappedFiles.isEmpty()) {
@@ -313,6 +329,11 @@ public class MappedFileQueue {
         return -1;
     }
 
+    /**
+     * 获取存储文件的最大偏移量
+     *
+     * @return 返回最后一个MappedFile的起始偏移量+文件当前的写指针？？？？
+     */
     public long getMaxOffset() {
         MappedFile mappedFile = getLastMappedFile();
         if (mappedFile != null) {
@@ -321,6 +342,11 @@ public class MappedFileQueue {
         return 0;
     }
 
+    /**
+     * 获取当前存储文件的写指针
+     *
+     * @return 返回最后一个MappedFile的起始偏移量+文件当前的写指针位置
+     */
     public long getMaxWrotePosition() {
         MappedFile mappedFile = getLastMappedFile();
         if (mappedFile != null) {
@@ -467,6 +493,7 @@ public class MappedFileQueue {
     }
 
     /**
+     * 根据消息偏移量查找MappedFile
      * Finds a mapped file by offset.
      *
      * @param offset Offset.
@@ -486,6 +513,7 @@ public class MappedFileQueue {
                         this.mappedFileSize,
                         this.mappedFiles.size());
                 } else {
+                    // 根据offset定位到对应的MappedFile的算法
                     int index = (int) ((offset / this.mappedFileSize) - (firstMappedFile.getFileFromOffset() / this.mappedFileSize));
                     MappedFile targetFile = null;
                     try {
@@ -497,7 +525,7 @@ public class MappedFileQueue {
                         && offset < targetFile.getFileFromOffset() + this.mappedFileSize) {
                         return targetFile;
                     }
-
+                    // 如果根据算法未找到对应的MappedFile，就采用循环遍历的方式查找
                     for (MappedFile tmpMappedFile : this.mappedFiles) {
                         if (offset >= tmpMappedFile.getFileFromOffset()
                             && offset < tmpMappedFile.getFileFromOffset() + this.mappedFileSize) {

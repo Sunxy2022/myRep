@@ -604,6 +604,7 @@ public class CommitLog {
         if (tranType == MessageSysFlag.TRANSACTION_NOT_TYPE
                 || tranType == MessageSysFlag.TRANSACTION_COMMIT_TYPE) {
             // Delay Delivery
+            // 如果消息的延迟级别>0，则消息的原主题名称和原消息队列ID存入消息属性中，并用延迟消息的主题和队列ID替换原先消息的主题与队列ID
             if (msg.getDelayTimeLevel() > 0) {
                 if (msg.getDelayTimeLevel() > this.defaultMessageStore.getScheduleMessageService().getMaxDelayLevel()) {
                     msg.setDelayTimeLevel(this.defaultMessageStore.getScheduleMessageService().getMaxDelayLevel());
@@ -642,21 +643,25 @@ public class CommitLog {
 
         long elapsedTimeInLock = 0;
         MappedFile unlockMappedFile = null;
-
+        // 上锁，串行写入commitLog文件
         putMessageLock.lock(); //spin or ReentrantLock ,depending on store config
         try {
+            // MappedFileQueue可以看做是${ROCKET_HOME}/store/commitlog文件夹，mappedFile对应改文件夹下一个个文件
+            // 获取该目录下最后一个commitLog文件
             MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile();
             long beginLockTimestamp = this.defaultMessageStore.getSystemClock().now();
             this.beginTimeInLock = beginLockTimestamp;
 
             // Here settings are stored timestamp, in order to ensure an orderly
             // global
+            // 设置消息存储的时间
             msg.setStoreTimestamp(beginLockTimestamp);
-
+            // mappedFile为空表明${ROCKET_HOME}/store/commitlog目录下不存在任何文件，说明本消息是第一次消息发送，用偏移量0创建第一个commitLog文件
             if (null == mappedFile || mappedFile.isFull()) {
                 mappedFile = this.mappedFileQueue.getLastMappedFile(0); // Mark: NewFile may be cause noise
             }
             if (null == mappedFile) {
+                // 如果创建失败，很有可能是因为磁盘空间不足或者权限不够
                 log.error("create mapped file1 error, topic: " + msg.getTopic() + " clientAddr: " + msg.getBornHostString());
                 beginTimeInLock = 0;
                 return CompletableFuture.completedFuture(new PutMessageResult(PutMessageStatus.CREATE_MAPEDFILE_FAILED, null));
@@ -1282,13 +1287,23 @@ public class CommitLog {
             this.maxMessageSize = size;
         }
 
+        /**
+         * 将消息内容追加到内存中，为数据持久化到磁盘做准备
+         *
+         * @param fileFromOffset    文件物理偏移量
+         * @param byteBuffer        commitLog文件对应的内存映射
+         * @param maxBlank          commitLog文件的空闲空间
+         * @param msgInner          MessageExtBrokerInner
+         * @param putMessageContext PutMessageContext
+         * @return AppendMessageResult
+         */
         public AppendMessageResult doAppend(final long fileFromOffset, final ByteBuffer byteBuffer, final int maxBlank,
-            final MessageExtBrokerInner msgInner, PutMessageContext putMessageContext) {
+                                            final MessageExtBrokerInner msgInner, PutMessageContext putMessageContext) {
             // STORETIMESTAMP + STOREHOSTADDRESS + OFFSET <br>
 
             // PHY OFFSET
             long wroteOffset = fileFromOffset + byteBuffer.position();
-
+            // 定义创建全局唯一消息ID的lambda表达式
             Supplier<String> msgIdSupplier = () -> {
                 int sysflag = msgInner.getSysFlag();
                 int msgIdLen = (sysflag & MessageSysFlag.STOREHOSTADDRESS_V6_FLAG) == 0 ? 4 + 4 + 8 : 16 + 4 + 8;
@@ -1326,15 +1341,20 @@ public class CommitLog {
             final int msgLen = preEncodeBuffer.getInt(0);
 
             // Determines whether there is sufficient free space
+            /*
+            如果消息长度+END_FILE_MIN_BLANK_LENGTH大于commitLog文件的空闲空间，则返回状态END_OF_FILE，上文中会重新创建一个新的commitLog文件
+            然后再次调用本方法进行重新写入
+             */
             if ((msgLen + END_FILE_MIN_BLANK_LENGTH) > maxBlank) {
                 this.msgStoreItemMemory.clear();
-                // 1 TOTALSIZE
+                // 1 TOTALSIZE 当前文件的剩余可用空间大小--4字节
                 this.msgStoreItemMemory.putInt(maxBlank);
-                // 2 MAGICCODE
+                // 2 MAGICCODE 存储魔数--4字节
                 this.msgStoreItemMemory.putInt(CommitLog.BLANK_MAGIC_CODE);
                 // 3 The remaining space may be any value
                 // Here the length of the specially set maxBlank
                 final long beginTimeMills = CommitLog.this.defaultMessageStore.now();
+                // 前8个字节存储TOTALSIZE和MAGICCODE；byteBuffer为commitLog文件对应的内存映射，为共享内容
                 byteBuffer.put(this.msgStoreItemMemory.array(), 0, 8);
                 return new AppendMessageResult(AppendMessageStatus.END_OF_FILE, wroteOffset,
                         maxBlank, /* only wrote 8 bytes, but declare wrote maxBlank for compute write position */
