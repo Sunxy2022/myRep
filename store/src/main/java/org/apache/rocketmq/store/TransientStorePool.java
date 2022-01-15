@@ -28,11 +28,23 @@ import org.apache.rocketmq.store.config.MessageStoreConfig;
 import org.apache.rocketmq.store.util.LibC;
 import sun.nio.ch.DirectBuffer;
 
+/**
+ * 短暂的存储池
+ */
 public class TransientStorePool {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
 
+    /**
+     * availableBuffers个数，可在broker配置文件中设置 TransientStorePool 默认为5
+     */
     private final int poolSize;
+    /**
+     * 每个byteBuffer的大小，默认为mapedFileSizeCommitLog，表明TransientStorePool为commitLog服务
+     */
     private final int fileSize;
+    /**
+     * ByteBuffer 容器，双端队列
+     */
     private final Deque<ByteBuffer> availableBuffers;
     private final MessageStoreConfig storeConfig;
 
@@ -48,10 +60,12 @@ public class TransientStorePool {
      */
     public void init() {
         for (int i = 0; i < poolSize; i++) {
+            // 创建poolSize个堆外内存
             ByteBuffer byteBuffer = ByteBuffer.allocateDirect(fileSize);
 
             final long address = ((DirectBuffer) byteBuffer).address();
             Pointer pointer = new Pointer(address);
+            // 将该批内存锁定，避免被置换到交换区，提高存储性能
             LibC.INSTANCE.mlock(pointer, new NativeLong(fileSize));
 
             availableBuffers.offer(byteBuffer);

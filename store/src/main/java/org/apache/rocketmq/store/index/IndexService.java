@@ -201,10 +201,12 @@ public class IndexService {
     public void buildIndex(DispatchRequest req) {
         IndexFile indexFile = retryGetAndCreateIndexFile();
         if (indexFile != null) {
+            // 获取index文件的最大物理偏移量
             long endPhyOffset = indexFile.getEndPhyOffset();
             DispatchRequest msg = req;
             String topic = msg.getTopic();
             String keys = msg.getKeys();
+            // 如果该消息的物理偏移量小于index文件的最大物理偏移量，则结束本次更新任务
             if (msg.getCommitLogOffset() < endPhyOffset) {
                 return;
             }

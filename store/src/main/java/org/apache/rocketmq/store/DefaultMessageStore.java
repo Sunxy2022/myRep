@@ -1203,6 +1203,14 @@ public class DefaultMessageStore implements MessageStore {
         return null;
     }
 
+    /**
+     * 根据topic和queueId查找对应的ConsumeQueue文件
+     * 仔细回想ConsumeQueue文件的目录结构~ ConsumeQueue->topic->queueId，最后获取queueId目录里的最后一个文件返回即可
+     *
+     * @param topic 主题
+     * @param queueId 消息队列ID
+     * @return ConsumeQueue
+     */
     public ConsumeQueue findConsumeQueue(String topic, int queueId) {
         ConcurrentMap<Integer, ConsumeQueue> map = consumeQueueTable.get(topic);
         if (null == map) {
@@ -1499,6 +1507,7 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     public void doDispatch(DispatchRequest req) {
+        // 分别调用 consumeQueue、IndexFile
         for (CommitLogDispatcher dispatcher : this.dispatcherList) {
             dispatcher.dispatch(req);
         }
@@ -1579,6 +1588,7 @@ public class DefaultMessageStore implements MessageStore {
 
         @Override
         public void dispatch(DispatchRequest request) {
+            // 读取配置是否开启更新index索引文件的任务
             if (DefaultMessageStore.this.messageStoreConfig.isMessageIndexEnable()) {
                 DefaultMessageStore.this.indexService.buildIndex(request);
             }
@@ -1913,8 +1923,15 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    /**
+     * broker服务器启动时会启动该线程，并初始化 reputFromOffset
+     */
     class ReputMessageService extends ServiceThread {
-
+        /**
+         * 该参数非常关键：指从哪个物理偏移量开始转发消息给consumeQueue和IndexFile
+         * 如果允许重复转发，reputFromOffset设置为commitLog的提交指针
+         * 如果不允许重复转发，reputFromOffset设置为commitLog中的最大偏移量
+         */
         private volatile long reputFromOffset = 0;
 
         public long getReputFromOffset() {
@@ -1950,6 +1967,9 @@ public class DefaultMessageStore implements MessageStore {
             return this.reputFromOffset < DefaultMessageStore.this.commitLog.getMaxOffset();
         }
 
+        /**
+         * 推送消息到消息消费队列文件（consumeQueue）和索引文件（indexFile）
+         */
         private void doReput() {
             if (this.reputFromOffset < DefaultMessageStore.this.commitLog.getMinOffset()) {
                 log.warn("The reputFromOffset={} is smaller than minPyOffset={}, this usually indicate that the dispatch behind too much and the commitlog has expired.",
@@ -1957,12 +1977,13 @@ public class DefaultMessageStore implements MessageStore {
                 this.reputFromOffset = DefaultMessageStore.this.commitLog.getMinOffset();
             }
             for (boolean doNext = true; this.isCommitLogAvailable() && doNext; ) {
-
+                // 如果设置为允许重复转发，且开始转发消息的物理偏移量大于commitLog文件的提交指针，则退出
+                // 言外之意，如果设置了允许重复转发，则reputFromOffset的值需要满足不大于commitLog文件的提交指针
                 if (DefaultMessageStore.this.getMessageStoreConfig().isDuplicationEnable()
                     && this.reputFromOffset >= DefaultMessageStore.this.getConfirmOffset()) {
                     break;
                 }
-
+                // 返回reputFromOffset开始的全部有效数据（commitLog文件）
                 SelectMappedBufferResult result = DefaultMessageStore.this.commitLog.getData(reputFromOffset);
                 if (result != null) {
                     try {

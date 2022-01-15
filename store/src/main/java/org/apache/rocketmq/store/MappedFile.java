@@ -66,7 +66,9 @@ public class MappedFile extends ReferenceResource {
     /**
      * Message will put to here first, and then reput to FileChannel if writeBuffer is not null.
      */
-    // 堆内存byteBuffer，如果不为空，数据首先将存储在改buffer中，然后提交到MappedFile对应的内存映射文件buffer。transientStorePoolEnable=true是不为空
+    // 堆内存byteBuffer，如果不为空，数据首先将存储在改buffer(writeBuffer)中
+    // 然后提交到MappedFile对应的内存映射文件buffer(mappedByteBuffer)。
+    // transientStorePoolEnable=true是不为空
     protected ByteBuffer writeBuffer = null;
     // 堆内存池，transientStorePoolEnable=true时启用
     protected TransientStorePool transientStorePool = null;
@@ -76,7 +78,11 @@ public class MappedFile extends ReferenceResource {
     private long fileFromOffset;
     // 物理文件
     private File file;
-    // 物理文件对应的内存映射buffer
+    /**
+     * 物理文件对应的内存映射buffer
+     * 内存缓存池，用来存储临时数据，数据先写入该内存映射中，然后由commit线程定时将该内存复制到目的物理文件对应的内存映射（writeBuffer）中
+     * 目的：提供一种内存锁定机制，将堆外内存一直锁定在内存中，避免被进程将内存交换到磁盘
+     */
     private MappedByteBuffer mappedByteBuffer;
     // 文件最后一次写入时间
     private volatile long storeTimestamp = 0;
@@ -456,6 +462,7 @@ public class MappedFile extends ReferenceResource {
 
     @Override
     public boolean cleanup(final long currentRef) {
+        // 如果 available = true，表示MappedFile当前可用，无需清理
         if (this.isAvailable()) {
             log.error("this file[REF:" + currentRef + "] " + this.fileName
                 + " have not shutdown, stop unmapping.");
@@ -475,11 +482,18 @@ public class MappedFile extends ReferenceResource {
         return true;
     }
 
+    /**
+     * mappedFile 销毁
+     *
+     * @param intervalForcibly 拒绝被销毁的最大时间
+     * @return boolean
+     */
     public boolean destroy(final long intervalForcibly) {
         this.shutdown(intervalForcibly);
 
         if (this.isCleanupOver()) {
             try {
+                // 关闭文件通道
                 this.fileChannel.close();
                 log.info("close file channel " + this.fileName + " OK");
 
