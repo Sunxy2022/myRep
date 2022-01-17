@@ -199,18 +199,23 @@ public class CommitLog {
 
             MappedFile mappedFile = mappedFiles.get(index);
             ByteBuffer byteBuffer = mappedFile.sliceByteBuffer();
+            // commitLog文件已确认的物理偏移量  等于mappedFile.getFileFromOffset()加上mappedFileOffset？
             long processOffset = mappedFile.getFileFromOffset();
+            // 当前文件已校验通过的offset
             long mappedFileOffset = 0;
             while (true) {
+                // 遍历commitLog文件，每次取出一条消息，如果查找结果为true并且消息的长度大于0
                 DispatchRequest dispatchRequest = this.checkMessageAndReturnSize(byteBuffer, checkCRCOnRecover);
                 int size = dispatchRequest.getMsgSize();
                 // Normal data
                 if (dispatchRequest.isSuccess() && size > 0) {
+                    // mappedFileOffset指针向前移动本消息的长度
                     mappedFileOffset += size;
                 }
                 // Come the end of the file, switch to the next file Since the
                 // return 0 representatives met last hole,
                 // this can not be included in truncate offset
+                // 说明达到了文件的末尾
                 else if (dispatchRequest.isSuccess() && size == 0) {
                     index++;
                     if (index >= mappedFiles.size()) {
@@ -218,6 +223,7 @@ public class CommitLog {
                         log.info("recover last 3 physics file over, last mapped file " + mappedFile.getFileName());
                         break;
                     } else {
+                        // 如果本文件后还有文件，则重置processOffset和mappedFileOffset，继续重复步骤
                         mappedFile = mappedFiles.get(index);
                         byteBuffer = mappedFile.sliceByteBuffer();
                         processOffset = mappedFile.getFileFromOffset();
@@ -227,6 +233,7 @@ public class CommitLog {
                 }
                 // Intermediate file read error
                 else if (!dispatchRequest.isSuccess()) {
+                    // 如果查找结果为false，表明该文件未填满所有消息
                     log.info("recover physics file end, " + mappedFile.getFileName());
                     break;
                 }

@@ -1373,6 +1373,7 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     private boolean isTempFileExist() {
+        // 判断abort文件是否存在，若存在说明是非正常退出。broker启动时会创建临时的abort文件，正常退出时删除该文件
         String fileName = StorePathConfigHelper.getAbortFile(this.messageStoreConfig.getStorePathRootDir());
         File file = new File(fileName);
         return file.exists();
